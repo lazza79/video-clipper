@@ -1,6 +1,6 @@
 import sys
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton
+from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QFileDialog
 
 
 class ClipperWindow(QMainWindow):
@@ -21,7 +21,17 @@ class ClipperWindow(QMainWindow):
         self.button.clicked.connect(self._on_load_clicked)
 
     def _on_load_clicked(self):
-        self.label.setText("Load button was clicked")
+        
+        path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Open Video", 
+            "", 
+            "Video files (*.mp4 *.mov *.mkv);; All files (*)"
+            )
+
+        if path:
+            self.label.setText(path)
+
 
 
 def main():
