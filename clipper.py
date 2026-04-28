@@ -1,6 +1,6 @@
 import sys
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton
 
 
 class ClipperWindow(QMainWindow):
@@ -12,10 +12,17 @@ class ClipperWindow(QMainWindow):
         container = QWidget()
         self.setCentralWidget(container)
         layout = QVBoxLayout(container)
-        #layout.addWidget(QLabel("No Video Loaded"))
-        label = QLabel("No Video Loaded")
-        label.setStyleSheet("background-color: red;")
-        layout.addWidget(label)
+
+        self.label = QLabel("No Video Loaded")
+        layout.addWidget(self.label)
+        
+        self.button = QPushButton("Load Video")
+        layout.addWidget(self.button)
+        self.button.clicked.connect(self._on_load_clicked)
+
+    def _on_load_clicked(self):
+        self.label.setText("Load button was clicked")
+
 
 def main():
     app = QApplication(sys.argv)
