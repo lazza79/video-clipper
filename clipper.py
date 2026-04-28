@@ -12,7 +12,10 @@ class ClipperWindow(QMainWindow):
         container = QWidget()
         self.setCentralWidget(container)
         layout = QVBoxLayout(container)
-        layout.addWidget(QLabel("No Video Loaded"))
+        #layout.addWidget(QLabel("No Video Loaded"))
+        label = QLabel("No Video Loaded")
+        label.setStyleSheet("background-color: red;")
+        layout.addWidget(label)
 
 def main():
     app = QApplication(sys.argv)
