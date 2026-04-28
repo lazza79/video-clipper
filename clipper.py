@@ -4,7 +4,7 @@ import json
 import os
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QFileDialog
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPixmap, QPainter, QColor
 from PySide6.QtCore import Qt
 from dataclasses import dataclass
 
@@ -80,6 +80,17 @@ def extract_frame(video_path: str, time_seconds:float) -> QImage:
     return QImage.fromData(result.stdout, "PPM")
 
 
+class TimeLineWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setMinimumHeight(80)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(40,40,50))
+        
+        
+
 class ClipperWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -97,10 +108,14 @@ class ClipperWindow(QMainWindow):
         self.preview.setFixedSize(640, 360)
         self.preview.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.preview)
+
+        self.timeline = TimeLineWidget()
+        layout.addWidget(self.timeline)
         
         self.button = QPushButton("Load Video")
         layout.addWidget(self.button)
         self.button.clicked.connect(self._on_load_clicked)
+
 
     def _on_load_clicked(self):
         
