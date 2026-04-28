@@ -88,6 +88,9 @@ class ClipperWindow(QMainWindow):
             )
 
         if path:
+            self._load_video(path)
+    
+    def _load_video(self, path:str):
             info = probe_video(path)
             self.label.setText(
                 f"{os.path.basename(info.path)} | "
@@ -97,6 +100,19 @@ class ClipperWindow(QMainWindow):
                 f"{info.duration:.2f}s | "
                 f"{info.codec}"
             )
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if len(urls) == 1 and urls[0].isLocalFile():
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def dropEvent(self, event):
+        path = event.mimeData().urls()[0].toLocalFile()
+        self._load_video(path)
+        event.acceptProposedAction()
 
 
 
