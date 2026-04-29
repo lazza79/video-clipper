@@ -2,13 +2,17 @@ import sys
 import subprocess
 import json
 import os
+import tempfile
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QFileDialog
 from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QPen
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThread, QRectF
 from dataclasses import dataclass
 from typing import Optional
 
+THUMBNAILS = 50
+TIMELINE_MIN_HEIGHT = 80
+THUMBNAIL_HEIGHT = 80
 
 @dataclass
 class VideoInfo:
@@ -85,9 +89,11 @@ class TimelineWidget(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setMinimumHeight(80)
+        self.setMinimumHeight(TIMELINE_MIN_HEIGHT)
         self.video_info: Optional[VideoInfo] = None
         self.current_frame: int = 0
+        self.thumbnails: list = []
+        self.thumbnails_count: int = 0
 
     def _x_for_frame(self, frame: int) -> int:
         if self.video_info is None or self.video_info.frame_count <= 1:
@@ -104,11 +110,18 @@ class TimelineWidget(QWidget):
         frame = int(round(ratio * (self.video_info.frame_count - 1)))
         return frame
 
-    def set_video(self, info: VideoInfo):
+    def set_video(self, info: VideoInfo, thumbnail_count: int):
         self.video_info = info
         self.current_frame = 0
+        self.thumbnails_count = thumbnail_count
+        self.thumbnails = [None] * thumbnail_count
         self.update()
-        
+    
+    def set_thumbnail(self, index: int, img: QImage):
+        if 0 <= index < len(self.thumbnails):
+            self.thumbnails[index] = img
+            self.update()
+
     def set_current_frame(self, frame: int):
         if self.video_info is None:
             return
@@ -117,16 +130,24 @@ class TimelineWidget(QWidget):
             self.current_frame = new
             self.update()
             self.frame_changed.emit(new)
-        
+    
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor(40, 40, 50))
 
+        # Draw Thumbnails
+        if self.thumbnails_count > 0:
+            slot_width = self.width() / self.thumbnails_count
+            for i, img in enumerate(self.thumbnails):
+                if img is not None:
+                    rect = QRectF(i * slot_width, 0, slot_width + 1, self.height())
+                    painter.drawImage(rect, img)
+        
+        # Draw Playhead
         x = self._x_for_frame(self.current_frame)
-
         painter.setPen(QPen(QColor(255, 255, 255), 2))
         painter.drawLine(x, 0, x, self.height())
-    
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             x = event.position().x()
@@ -181,6 +202,20 @@ class ClipperWindow(QMainWindow):
         if path:
             self._load_video(path)
     
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if len(urls) == 1 and urls[0].isLocalFile():
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def dropEvent(self, event):
+        path = event.mimeData().urls()[0].toLocalFile()
+        self._load_video(path)
+        event.acceptProposedAction()    
+
+
     def _update_preview(self, info: VideoInfo, frame: int):
         img = extract_frame(info.path, frame / info.fps)
         pix = QPixmap.fromImage(img)
@@ -203,23 +238,60 @@ class ClipperWindow(QMainWindow):
             f"{info.codec}"
         )
 
-        self._update_preview(info, 0)
+        self._update_preview(info, info.frame_count*0.15)
 
-        self.timeline.set_video(info)
-        
+        self.timeline.set_video(info, THUMBNAILS)
 
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            urls = event.mimeData().urls()
-            if len(urls) == 1 and urls[0].isLocalFile():
-                event.acceptProposedAction()
-                return
-        event.ignore()
+        self.worker = ThumbnailWorker(info.path, THUMBNAILS, THUMBNAIL_HEIGHT, info.duration)
+        self.worker.thumbnail_ready.connect(self.timeline.set_thumbnail)
+        self.worker.start()   
 
-    def dropEvent(self, event):
-        path = event.mimeData().urls()[0].toLocalFile()
-        self._load_video(path)
-        event.acceptProposedAction()
+
+class ThumbnailWorker(QThread):
+    thumbnail_ready = Signal(int, QImage)
+
+    def __init__(self, video_path: str, count: int, height: int, duration: float):
+        super().__init__()
+        self.video_path = video_path
+        self.count = count
+        self.height = height
+        self.duration = duration
+
+    def run(self):
+        with tempfile.TemporaryDirectory(prefix="rascal_clipper_thumbs_") as tmp:
+            #info = probe_video(self.video_path)
+            rate = self.count / self.duration
+            pattern = os.path.join(tmp, "thumb_%05d.jpg")
+            cmd = [
+                "ffmpeg", "-loglevel", "error", "-y",
+                "-i", self.video_path,
+                "-vf", f"fps={rate:.6f},scale=-1:{self.height}",
+                "-q:v", "5",
+                pattern,
+            ]
+            proc = subprocess.Popen(cmd)
+
+            emitted = set()
+            while proc.poll() is None:
+                self._scan(tmp, emitted, drop_last=True)
+                self.msleep(150)
+            self._scan(tmp, emitted, drop_last=False)
+
+    def _scan(self, tmp: str, emitted: set, drop_last:bool):
+        files = sorted(f for f in os.listdir(tmp) if f.endswith(".jpg"))
+        if drop_last and files:
+            files = files[:-1]
+        for fname in files:
+            if fname in emitted:
+                continue
+            idx = int(fname.split("_")[1].split(".")[0]) - 1
+            img = QImage(os.path.join(tmp, fname))
+            if not img.isNull():
+                self.thumbnail_ready.emit(idx, img.copy())
+                emitted.add(fname)
+    
+    
+
 
 
 
