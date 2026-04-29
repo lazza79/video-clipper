@@ -4,9 +4,10 @@ import json
 import os
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QFileDialog
-from PySide6.QtGui import QImage, QPixmap, QPainter, QColor
+from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QPen
 from PySide6.QtCore import Qt
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -80,20 +81,60 @@ def extract_frame(video_path: str, time_seconds:float) -> QImage:
     return QImage.fromData(result.stdout, "PPM")
 
 
-class TimeLineWidget(QWidget):
+class TimelineWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.setMinimumHeight(80)
+        self.video_info: Optional[VideoInfo] = None
+        self.current_frame: int = 0
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor(40,40,50))
+
+    def set_video(self, info: VideoInfo):
+        self.video_info = info
+        self.current_frame = 0
+        self.update()
+        
+    def set_current_frame(self, frame: int):
+        if self.video_info is None:
+            return
+        new = max(0, min(int(frame), self.video_info.frame_count - 1))
+        if new != self.current_frame:
+            self.current_frame = new
+            self.update()
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(40, 40, 50))
+
+        if self.video_info is None:
+            return
+    
+        # Compute playhead X position from current frame
+        ratio = self.current_frame / max(1, self.video_info.frame_count - 1)
+        x = int (ratio * (self.width() - 1))
+
+        painter.setPen(QPen(QColor(255, 255, 255), 2))
+        painter.drawLine(x, 0, x, self.height())
+    
+    def mousePressEvent(self, event):
+        if self.video_info is None:
+            return
+        
+        if event.button() == Qt.LeftButton:
+            x = event.position().x()
+            ratio = max(0.0, min(1.0, x / max(1, self.width() - 1)))
+            frame = int(round(ratio * (self.video_info.frame_count - 1)))
+            self.set_current_frame(frame)
         
         
 
 class ClipperWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setAcceptDrops(True)
         self.setWindowTitle("Rascal Clipper")
         self.resize(1200, 780)
 
@@ -109,7 +150,7 @@ class ClipperWindow(QMainWindow):
         self.preview.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.preview)
 
-        self.timeline = TimeLineWidget()
+        self.timeline = TimelineWidget()
         layout.addWidget(self.timeline)
         
         self.button = QPushButton("Load Video")
@@ -140,7 +181,7 @@ class ClipperWindow(QMainWindow):
             f"{info.codec}"
         )
 
-        img = extract_frame(path, 0)
+        img = extract_frame(path, 0.0)
         pix = QPixmap.fromImage(img)
         scaled = pix.scaled(
             self.preview.size(),
@@ -149,7 +190,7 @@ class ClipperWindow(QMainWindow):
         )
         self.preview.setPixmap(scaled)
 
-
+        self.timeline.set_video(info)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
