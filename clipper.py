@@ -20,7 +20,6 @@ class VideoInfo:
     frame_count: int
     codec: str
 
-
 def probe_video(path: str) -> VideoInfo:
     cmd = [
         "ffprobe",
@@ -88,9 +87,20 @@ class TimelineWidget(QWidget):
         self.video_info: Optional[VideoInfo] = None
         self.current_frame: int = 0
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(40,40,50))
+    def _x_for_frame(self, frame: int) -> int:
+        if self.video_info is None or self.video_info.frame_count <= 1:
+            return 0.0
+        ratio = frame / (self.video_info.frame_count - 1)
+        x = int(ratio * (self.width() - 1))
+        return x
+    
+    def _frame_for_x(self, x: float) -> int:
+        if self.video_info is None:
+            return 0
+        
+        ratio = max(0.0, min(1.0, x / max(1, self.width() - 1)))
+        frame = int(round(ratio * (self.video_info.frame_count - 1)))
+        return frame
 
     def set_video(self, info: VideoInfo):
         self.video_info = info
@@ -109,25 +119,17 @@ class TimelineWidget(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor(40, 40, 50))
 
-        if self.video_info is None:
-            return
-    
-        # Compute playhead X position from current frame
-        ratio = self.current_frame / max(1, self.video_info.frame_count - 1)
-        x = int (ratio * (self.width() - 1))
+        x = self._x_for_frame(self.current_frame)
 
         painter.setPen(QPen(QColor(255, 255, 255), 2))
         painter.drawLine(x, 0, x, self.height())
     
     def mousePressEvent(self, event):
-        if self.video_info is None:
-            return
         
         if event.button() == Qt.LeftButton:
             x = event.position().x()
-            ratio = max(0.0, min(1.0, x / max(1, self.width() - 1)))
-            frame = int(round(ratio * (self.video_info.frame_count - 1)))
-            self.set_current_frame(frame)
+
+            self.set_current_frame(self._frame_for_x(x))
         
         
 
