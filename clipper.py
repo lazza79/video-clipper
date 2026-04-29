@@ -13,6 +13,7 @@ from typing import Optional
 THUMBNAILS = 50
 TIMELINE_MIN_HEIGHT = 80
 THUMBNAIL_HEIGHT = 80
+DEFAULT_START_FRAME = 0
 
 @dataclass
 class VideoInfo:
@@ -153,6 +154,11 @@ class TimelineWidget(QWidget):
             x = event.position().x()
 
             self.set_current_frame(self._frame_for_x(x))
+    
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton:
+            x = event.position().x()
+            self.set_current_frame(self._frame_for_x(x))
         
         
 
@@ -162,6 +168,7 @@ class ClipperWindow(QMainWindow):
         self.setAcceptDrops(True)
         self.setWindowTitle("Rascal Clipper")
         self.resize(1200, 780)
+        self.setFocusPolicy(Qt.StrongFocus)
 
         container = QWidget()
         self.setCentralWidget(container)
@@ -169,6 +176,9 @@ class ClipperWindow(QMainWindow):
 
         self.label = QLabel("No Video Loaded")
         layout.addWidget(self.label)
+
+        self.frame_label = QLabel("Frame: — / —    TC: --:--:--:--")
+        layout.addWidget(self.frame_label)
 
         self.preview = QLabel()
         self.preview.setFixedSize(640, 360)
@@ -189,6 +199,25 @@ class ClipperWindow(QMainWindow):
         if info is None:
             return
         self._update_preview(info, frame)
+        self._update_frame_label(frame)
+
+    def _update_frame_label(self, frame: int):
+        info = self.timeline.video_info
+        if info is None:
+            return
+        tc = self._format_tc(frame, info.fps)
+        self.frame_label.setText(f"Frame: {frame} / {info.frame_count - 1}    TC: {tc}")
+
+    def _format_tc(self, frame: int, fps: float) -> str:
+        fps_int = max(1, int(round(fps)))
+        f = frame % fps_int
+        s_total = frame // fps_int
+        s = s_total % 60
+        m = (s_total // 60) % 60
+        h = s_total // 3600
+        tc = f"{h:02d}:{m:02d}:{s:02d}:{f:02d}"
+        
+        return tc
 
     def _on_load_clicked(self):
         
@@ -215,6 +244,22 @@ class ClipperWindow(QMainWindow):
         self._load_video(path)
         event.acceptProposedAction()    
 
+    def keyPressEvent(self, event):
+        print(f"keyPressEvent fired: key={event.key()}")
+        if not self.timeline.video_info:
+            return super().keyPressEvent(event)
+        
+        k = event.key()
+        mods = event.modifiers()
+
+        if k == Qt.Key_Left:
+            delta = -10 if mods & Qt.ShiftModifier else -1
+            self.timeline.set_current_frame(self.timeline.current_frame + delta)
+        elif k == Qt.Key_Right:
+            delta = 10 if mods & Qt.ShiftModifier else 1
+            self.timeline.set_current_frame(self.timeline.current_frame + delta)
+        else:
+            return super().keyPressEvent(event)
 
     def _update_preview(self, info: VideoInfo, frame: int):
         img = extract_frame(info.path, frame / info.fps)
@@ -238,13 +283,19 @@ class ClipperWindow(QMainWindow):
             f"{info.codec}"
         )
 
-        self._update_preview(info, info.frame_count*0.15)
+        self._update_preview(info, DEFAULT_START_FRAME)
 
         self.timeline.set_video(info, THUMBNAILS)
+        self.timeline.set_current_frame(DEFAULT_START_FRAME)
+        self._update_frame_label(0)
 
         self.worker = ThumbnailWorker(info.path, THUMBNAILS, THUMBNAIL_HEIGHT, info.duration)
         self.worker.thumbnail_ready.connect(self.timeline.set_thumbnail)
-        self.worker.start()   
+        self.worker.start()
+
+        self.activateWindow()
+        self.raise_()
+        self.setFocus()
 
 
 class ThumbnailWorker(QThread):
@@ -259,7 +310,6 @@ class ThumbnailWorker(QThread):
 
     def run(self):
         with tempfile.TemporaryDirectory(prefix="rascal_clipper_thumbs_") as tmp:
-            #info = probe_video(self.video_path)
             rate = self.count / self.duration
             pattern = os.path.join(tmp, "thumb_%05d.jpg")
             cmd = [
