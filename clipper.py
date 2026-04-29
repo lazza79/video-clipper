@@ -5,7 +5,7 @@ import os
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QFileDialog
 from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QPen
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from dataclasses import dataclass
 from typing import Optional
 
@@ -81,13 +81,15 @@ def extract_frame(video_path: str, time_seconds:float) -> QImage:
 
 
 class TimelineWidget(QWidget):
+    frame_changed = Signal(int)
+
     def __init__(self):
         super().__init__()
         self.setMinimumHeight(80)
         self.video_info: Optional[VideoInfo] = None
         self.current_frame: int = 0
 
-    def _x_for_frame(self, frame: int):
+    def _x_for_frame(self, frame: int) -> int:
         if self.video_info is None or self.video_info.frame_count <= 1:
             return 0.0
         ratio = frame / (self.video_info.frame_count - 1)
@@ -114,6 +116,7 @@ class TimelineWidget(QWidget):
         if new != self.current_frame:
             self.current_frame = new
             self.update()
+            self.frame_changed.emit(new)
         
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -125,7 +128,6 @@ class TimelineWidget(QWidget):
         painter.drawLine(x, 0, x, self.height())
     
     def mousePressEvent(self, event):
-        
         if event.button() == Qt.LeftButton:
             x = event.position().x()
 
@@ -153,12 +155,19 @@ class ClipperWindow(QMainWindow):
         layout.addWidget(self.preview)
 
         self.timeline = TimelineWidget()
+        self.timeline.frame_changed.connect(self._on_frame_changed)
         layout.addWidget(self.timeline)
         
         self.button = QPushButton("Load Video")
         layout.addWidget(self.button)
         self.button.clicked.connect(self._on_load_clicked)
 
+
+    def _on_frame_changed(self, frame: int):
+        info = self.timeline.video_info
+        if info is None:
+            return
+        self._update_preview(info, frame)
 
     def _on_load_clicked(self):
         
@@ -172,6 +181,17 @@ class ClipperWindow(QMainWindow):
         if path:
             self._load_video(path)
     
+    def _update_preview(self, info: VideoInfo, frame: int):
+        img = extract_frame(info.path, frame / info.fps)
+        pix = QPixmap.fromImage(img)
+        scaled = pix.scaled(
+            self.preview.size(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
+        )
+        self.preview.setPixmap(scaled)
+        
+
     def _load_video(self, path:str):
         info = probe_video(path)
         self.label.setText(
@@ -183,16 +203,10 @@ class ClipperWindow(QMainWindow):
             f"{info.codec}"
         )
 
-        img = extract_frame(path, 0.0)
-        pix = QPixmap.fromImage(img)
-        scaled = pix.scaled(
-            self.preview.size(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
-        self.preview.setPixmap(scaled)
+        self._update_preview(info, 0)
 
         self.timeline.set_video(info)
+        
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
