@@ -87,7 +87,7 @@ class TimelineWidget(QWidget):
         self.video_info: Optional[VideoInfo] = None
         self.current_frame: int = 0
 
-    def _x_for_frame(self, frame: int) -> int:
+    def _x_for_frame(self, frame: int):
         if self.video_info is None or self.video_info.frame_count <= 1:
             return 0.0
         ratio = frame / (self.video_info.frame_count - 1)
