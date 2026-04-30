@@ -6,7 +6,7 @@ import tempfile
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QFileDialog
 from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QPen
-from PySide6.QtCore import Qt, Signal, QThread, QRectF
+from PySide6.QtCore import Qt, Signal, QThread, QRectF, QTimer
 from dataclasses import dataclass
 from typing import Optional
 
@@ -24,6 +24,16 @@ class VideoInfo:
     duration: float
     frame_count: int
     codec: str
+
+@dataclass
+class CutPoint:
+    frame: int
+    kind: str    # "in" or "out"
+
+@dataclass
+class Clip:
+    in_frame: int
+    out_frame: int
 
 def probe_video(path: str) -> VideoInfo:
     cmd = [
@@ -95,6 +105,14 @@ class TimelineWidget(QWidget):
         self.current_frame: int = 0
         self.thumbnails: list = []
         self.thumbnails_count: int = 0
+        self.markers: list[CutPoint] = []
+
+    def add_marker_at_current(self, kind: str):
+        if self.video_info is None:
+            return
+        self.markers.append(CutPoint(self.current_frame, kind))
+        self.markers.sort(key=lambda m: m.frame)
+        self.update
 
     def _x_for_frame(self, frame: int) -> int:
         if self.video_info is None or self.video_info.frame_count <= 1:
@@ -148,6 +166,13 @@ class TimelineWidget(QWidget):
         x = self._x_for_frame(self.current_frame)
         painter.setPen(QPen(QColor(255, 255, 255), 2))
         painter.drawLine(x, 0, x, self.height())
+
+        # Draw Markers
+        for m in self.markers:
+            x = self._x_for_frame(m.frame)
+            color = QColor(80, 220, 130) if m.kind == "in" else QColor(230, 110, 90)
+            painter.setPen(QPen(color, 2))
+            painter.drawLine(x, 0, x, self.height())
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -245,14 +270,19 @@ class ClipperWindow(QMainWindow):
         event.acceptProposedAction()    
 
     def keyPressEvent(self, event):
-        print(f"keyPressEvent fired: key={event.key()}")
         if not self.timeline.video_info:
             return super().keyPressEvent(event)
         
         k = event.key()
         mods = event.modifiers()
 
-        if k == Qt.Key_Left:
+        if k == Qt.Key_I:
+            self.timeline.add_marker_at_current("in")
+            print(self.timeline.markers)
+        elif k == Qt.Key_O:
+            self.timeline.add_marker_at_current("out")
+            print(self.timeline.markers)
+        elif k == Qt.Key_Left:
             delta = -10 if mods & Qt.ShiftModifier else -1
             self.timeline.set_current_frame(self.timeline.current_frame + delta)
         elif k == Qt.Key_Right:
@@ -287,15 +317,13 @@ class ClipperWindow(QMainWindow):
 
         self.timeline.set_video(info, THUMBNAILS)
         self.timeline.set_current_frame(DEFAULT_START_FRAME)
-        self._update_frame_label(0)
+        self._update_frame_label(DEFAULT_START_FRAME)
 
         self.worker = ThumbnailWorker(info.path, THUMBNAILS, THUMBNAIL_HEIGHT, info.duration)
         self.worker.thumbnail_ready.connect(self.timeline.set_thumbnail)
         self.worker.start()
 
-        self.activateWindow()
-        self.raise_()
-        self.setFocus()
+        QTimer.singleShot(0, self.setFocus)
 
 
 class ThumbnailWorker(QThread):
